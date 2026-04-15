@@ -4,7 +4,9 @@ toc: true
 toc-depth: 3
 ---
 [Link to GitHub repository](https://github.com/bowlofcupramen/JSC370-final-project)
+
 [Link to the report](https://github.com/bowlofcupramen/JSC370-final-project/blob/main/report/report.pdf)
+
 ## Description
 
 This project investigates the relationship between health system indicators and the spread of HIV across countries and years. The number of new cases annually is modeled by the healthcare spending (as a proportion of total spending, in percent), as well as medical doctors, nursing staff, and pharmacist density (as a number per 10 000 population). The data are obtained from the World Health Organization's (WHO). The overall conclusion was that investing in more pharmacists and doctors have a greater impact then investing in more nurses and/or midwives, or by simply increasing the spending in the health sector in general. Though the amount of available data is a strong limitation of the applicability of the results to the real world. it can be taken into consideration when making decisions where the ultimate goal is to reduce the spread of HIV.
