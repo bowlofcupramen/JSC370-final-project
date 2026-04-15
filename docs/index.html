@@ -24,7 +24,6 @@ ul.task-list li input[type="checkbox"] {
 
 
 <script src="site_libs/quarto-nav/quarto-nav.js"></script>
-<script src="site_libs/quarto-nav/headroom.min.js"></script>
 <script src="site_libs/clipboard/clipboard.min.js"></script>
 <script src="site_libs/quarto-search/autocomplete.umd.js"></script>
 <script src="site_libs/quarto-search/fuse.min.js"></script>
@@ -40,13 +39,13 @@ ul.task-list li input[type="checkbox"] {
 <link href="site_libs/quarto-html/quarto-syntax-highlighting-587c61ba64f3a5504c4d52d930310e48.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="site_libs/bootstrap/bootstrap-d4ad837101b0c40a5480b2989a47d44a.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<link href="site_libs/bootstrap/bootstrap-e31584831b205ffbb2d98406f31c2a5b.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
-  "location": "navbar",
+  "location": "sidebar",
   "copy-button": false,
   "collapse-after": 3,
-  "panel-placement": "end",
-  "type": "overlay",
+  "panel-placement": "start",
+  "type": "textbox",
   "limit": 50,
   "keyboard-shortcut": [
     "f",
@@ -99,38 +98,14 @@ window.Quarto = {
 };
 </script>
 
+<link rel="stylesheet" href="styles.css">
 </head>
 
-<body class="nav-fixed quarto-light">
+<body class="quarto-light">
 
 <div id="quarto-search-results"></div>
-  <header id="quarto-header" class="headroom fixed-top">
-    <nav class="navbar navbar-expand-lg " data-bs-theme="dark">
-      <div class="navbar-container container-fluid">
-      <div class="navbar-brand-container mx-auto">
-    <a class="navbar-brand" href="./index.html">
-    <span class="navbar-title">HIV and Health Indicators Analysis</span>
-    </a>
-  </div>
-            <div id="quarto-search" class="" title="Search"></div>
-          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" role="menu" aria-expanded="false" aria-label="Toggle navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
-  <span class="navbar-toggler-icon"></span>
-</button>
-          <div class="collapse navbar-collapse" id="navbarCollapse">
-            <ul class="navbar-nav navbar-nav-scroll me-auto">
-  <li class="nav-item">
-    <a class="nav-link active" href="./index.html" aria-current="page"> 
-<span class="menu-text">Home</span></a>
-  </li>  
-</ul>
-          </div> <!-- /navcollapse -->
-            <div class="quarto-navbar-tools">
-</div>
-      </div> <!-- /container-fluid -->
-    </nav>
-</header>
 <!-- content -->
-<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article">
 <!-- sidebar -->
 <!-- margin-sidebar -->
     <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
@@ -138,7 +113,10 @@ window.Quarto = {
     <h2 id="toc-title">On this page</h2>
    
   <ul>
-  <li><a href="#data" id="toc-data" class="nav-link active" data-scroll-target="#data">Data</a></li>
+  <li><a href="#description" id="toc-description" class="nav-link active" data-scroll-target="#description">Description</a>
+  <ul class="collapse">
+  <li><a href="#data" id="toc-data" class="nav-link" data-scroll-target="#data">Data</a></li>
+  </ul></li>
   <li><a href="#exploratory-data-analysis" id="toc-exploratory-data-analysis" class="nav-link" data-scroll-target="#exploratory-data-analysis">Exploratory Data Analysis</a></li>
   <li><a href="#models" id="toc-models" class="nav-link" data-scroll-target="#models">Models</a>
   <ul class="collapse">
@@ -171,7 +149,10 @@ window.Quarto = {
 </header>
 
 
-<p><a href="https://github.com/bowlofcupramen/JSC370-final-project">Link to GitHub repository</a> <a href="https://github.com/bowlofcupramen/JSC370-final-project/blob/main/report/report.pdf">Link to the report</a> ## Description</p>
+<p><a href="https://github.com/bowlofcupramen/JSC370-final-project">Link to GitHub repository</a></p>
+<p><a href="https://github.com/bowlofcupramen/JSC370-final-project/blob/main/report/report.pdf">Link to the report</a></p>
+<section id="description" class="level2">
+<h2 class="anchored" data-anchor-id="description">Description</h2>
 <p>This project investigates the relationship between health system indicators and the spread of HIV across countries and years. The number of new cases annually is modeled by the healthcare spending (as a proportion of total spending, in percent), as well as medical doctors, nursing staff, and pharmacist density (as a number per 10 000 population). The data are obtained from the World Health Organization’s (WHO). The overall conclusion was that investing in more pharmacists and doctors have a greater impact then investing in more nurses and/or midwives, or by simply increasing the spending in the health sector in general. Though the amount of available data is a strong limitation of the applicability of the results to the real world. it can be taken into consideration when making decisions where the ultimate goal is to reduce the spread of HIV.</p>
 <section id="data" class="level3">
 <h3 class="anchored" data-anchor-id="data">Data</h3>
@@ -209,11 +190,17 @@ window.Quarto = {
 <p>Countries are identified by ISO3 code and span multiple years of observation. Regional aggregates (e.g.&nbsp;<code>GLOBAL</code>, <code>EUR</code>, <code>EMR</code>) were excluded prior to analysis. Missing values were imputed using forward-fill and backward-fill within each country group, applying linear imputation where possible.</p>
 <hr>
 </section>
+</section>
 <section id="exploratory-data-analysis" class="level2">
 <h2 class="anchored" data-anchor-id="exploratory-data-analysis">Exploratory Data Analysis</h2>
-<p>The map below shows how the indicators and number of new HIV cases vary across countries and years. Use the dropdown to switch between metrics and the slider to move through years. Gray indicates that no data was available for that country in that year for that indicator. Note that there seem to be a lot of missing data. ::: {#fig-map}</p>
-<iframe src="plots/fig1.html" width="100%" height="620px" frameborder="0" scrolling="no"></iframe>
-<p>Global health indicators over time. :::</p>
+The map below shows how the indicators and number of new HIV cases vary across countries and years. Use the dropdown to switch between metrics and the slider to move through years. Gray indicates that no data was available for that country in that year for that indicator. Note that there seem to be a lot of missing data.
+<figure class="custom-figure figure">
+<iframe src="plots/fig1.html" width="100%" height="620px" frameborder="0" scrolling="no">
+</iframe>
+<figcaption>
+Figure 1: Global health indicators over time.
+</figcaption>
+</figure>
 <hr>
 </section>
 <section id="models" class="level2">
@@ -252,21 +239,36 @@ window.Quarto = {
 <p>A <strong>nested cross-validation</strong> design was used. The cross validation was done using <code>RandomizedSearchCV</code> with a 5-fold outer loop and a 3-fold inner loop across 30 iterations to tune the hyperparameters. An 80/20 train/test split was held out entirely from cross-validation and used for testing at the end.</p>
 <section id="model-performance" class="level3">
 <h3 class="anchored" data-anchor-id="model-performance">Model Performance</h3>
-<p>The plot below displays the root mean squared error (RMSE) and the Pearson R<span class="math inline">\(^2\)</span> values for each of the three model types, for each of the four variants (by feature). The drop down menu can be use to toggle how the plots group the models (by features used vs by model type). We see that in general, using all features yields the best metric values, while using the aggregate gives the worst. Random forest also appears to slightly outperform XGB under these metrics. ::: {#fig-map}</p>
-<iframe src="plots/fig2.html" width="100%" height="550px" frameborder="0" scrolling="no"></iframe>
-<p>The root mean squared error and Pearson R<span class="math inline">\(^2\)</span> for each model and its variants. :::</p>
+The plot below displays the root mean squared error (RMSE) and the Pearson R<span class="math inline">\(^2\)</span> values for each of the three model types, for each of the four variants (by feature). The drop down menu can be use to toggle how the plots group the models (by features used vs by model type). We see that in general, using all features yields the best metric values, while using the aggregate gives the worst. Random forest also appears to slightly outperform XGB under these metrics.
+<figure class="custom-figure figure">
+<iframe src="plots/fig2.html" width="100%" height="550px" frameborder="0" scrolling="no">
+</iframe>
+<figcaption>
+Figure 2: The root mean squared error and Pearson R<span class="math inline">\(^2\)</span> for each model and its variants.
+</figcaption>
+</figure>
 </section>
 <section id="residuals" class="level3">
 <h3 class="anchored" data-anchor-id="residuals">Residuals</h3>
-<p>The plot below shows the residuals of each of the models when using <code>all</code> features. It is clear that the errors do not appear to be normally distributed, instead possessing a systematic pattern of being cone shaped, fanning out towards the right. ::: {#fig-map}</p>
-<iframe src="plots/fig3.html" width="100%" height="560px" frameborder="0" scrolling="no"></iframe>
-<p>The residuals of each model when using all features. :::</p>
+The plot below shows the residuals of each of the models when using <code>all</code> features. It is clear that the errors do not appear to be normally distributed, instead possessing a systematic pattern of being cone shaped, fanning out towards the right.
+<figure class="custom-figure figure">
+<iframe src="plots/fig3.html" width="100%" height="560px" frameborder="0" scrolling="no">
+</iframe>
+<figcaption>
+Figure 3: The residuals of each model when using all features.
+</figcaption>
+</figure>
 </section>
 <section id="actual-vs-predicted" class="level3">
 <h3 class="anchored" data-anchor-id="actual-vs-predicted">Actual vs Predicted</h3>
-<p>This plot shows the actual value in contrast to the predicted values. The red dashed line is where the points would be if the model performed perfectly. It can be seen that both the random forest and the XGB models overestimate the smaller points. ::: {#fig-map}</p>
-<iframe src="plots/fig4.html" width="100%" height="540px" frameborder="0" scrolling="no"></iframe>
-<p>The actual versus predicted values of each model when using all features, when predicting the test values. :::</p>
+This plot shows the actual value in contrast to the predicted values. The red dashed line is where the points would be if the model performed perfectly. It can be seen that both the random forest and the XGB models overestimate the smaller points.
+<figure class="custom-figure figure">
+<iframe src="plots/fig4.html" width="100%" height="540px" frameborder="0" scrolling="no">
+</iframe>
+<figcaption>
+Figure 4: The actual versus predicted values of each model when using all features, when predicting the test values.
+</figcaption>
+</figure>
 
 
 </section>

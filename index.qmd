@@ -3,9 +3,10 @@ title: "On the Effects of Government Medical Spending and Health Personnel On HI
 toc: true
 toc-depth: 3
 ---
+
 [Link to GitHub repository](https://github.com/bowlofcupramen/JSC370-final-project)
 
-[Link to the report](https://github.com/bowlofcupramen/JSC370-final-project/blob/main/report/report.pdf)
+[Link to report](https://github.com/bowlofcupramen/JSC370-final-project/blob/main/report/report.pdf)
 
 ## Description
 
@@ -30,12 +31,11 @@ Countries are identified by ISO3 code and span multiple years of observation. Re
 ## Exploratory Data Analysis
 
 The map below shows how the indicators and number of new HIV cases vary across countries and years. Use the dropdown to switch between metrics and the slider to move through years. Gray indicates that no data was available for that country in that year for that indicator. Note that there seem to be a lot of missing data.
-::: {#fig-map}
-```{=html}
-<iframe src="plots/fig1.html" width="100%" height="620px" frameborder="0" scrolling="no"></iframe>
-```
-Global health indicators over time.
-:::
+<figure class="custom-figure">
+    <iframe src="plots/fig1.html" width="100%" height="620px" frameborder="0" scrolling="no"></iframe>
+    <figcaption>Figure 1: Global health indicators over time.</figcaption>
+</figure>
+
 
 ---
 
@@ -55,29 +55,23 @@ A **nested cross-validation** design was used. The cross validation was done usi
 ### Model Performance
 
 The plot below displays the root mean squared error (RMSE) and the Pearson R$^2$ values for each of the three model types, for each of the four variants (by feature). The drop down menu can be use to toggle how the plots group the models (by features used vs by model type). We see that in general, using all features yields the best metric values, while using the aggregate gives the worst. Random forest also appears to slightly outperform XGB under these metrics.
-::: {#fig-map}
-```{=html}
-<iframe src="plots/fig2.html" width="100%" height="550px" frameborder="0" scrolling="no"></iframe>
-```
-The root mean squared error and Pearson R$^2$ for each model and its variants.
-:::
+<figure class="custom-figure">
+    <iframe src="plots/fig2.html" width="100%" height="550px" frameborder="0" scrolling="no"></iframe>
+    <figcaption>Figure 2: The root mean squared error and Pearson R$^2$ for each model and its variants.</figcaption>
+</figure>
 
 ### Residuals
 
 The plot below shows the residuals of each of the models when using `all` features. It is clear that the errors do not appear to be normally distributed, instead possessing a systematic pattern of being cone shaped, fanning out towards the right.
-::: {#fig-map}
-```{=html}
-<iframe src="plots/fig3.html" width="100%" height="560px" frameborder="0" scrolling="no"></iframe>
-```
-The residuals of each model when using all features.
-:::
+<figure class="custom-figure">
+    <iframe src="plots/fig3.html" width="100%" height="560px" frameborder="0" scrolling="no"></iframe>
+    <figcaption>Figure 3: The residuals of each model when using all features.</figcaption>
+</figure>
 
 ### Actual vs Predicted
 
 This plot shows the actual value in contrast to the predicted values. The red dashed line is where the points would be if the model performed perfectly. It can be seen that both the random forest and the XGB models overestimate the smaller points.
-::: {#fig-map}
-```{=html}
-<iframe src="plots/fig4.html" width="100%" height="540px" frameborder="0" scrolling="no"></iframe>
-```
-The actual versus predicted values of each model when using all features, when predicting the test values.
-:::
+<figure class="custom-figure">
+    <iframe src="plots/fig4.html" width="100%" height="540px" frameborder="0" scrolling="no"></iframe>
+    <figcaption>Figure 4: The actual versus predicted values of each model when using all features, when predicting the test values.</figcaption>
+</figure>

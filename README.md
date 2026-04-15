@@ -1,4 +1,7 @@
 # JSC370 Final Project
+
+[Link to website](https://bowlofcupramen.github.io/JSC370-final-project/)
+
 ## On the Effects of Government Medical Spending and Health
 Personnel On HIV Spread
 This project concerns the relationship between the spread of HIV and a government's spendings on its health sector, as well as it's core personnel information, which includes medical doctors, nurses and midwives, as well as pharmacists. 

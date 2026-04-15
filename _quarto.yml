@@ -4,12 +4,6 @@ project:
 
 website:
   title: "HIV and Health Indicators Analysis"
-  navbar:
-    background: dark
-    foreground: light
-    left:
-      - href: index.qmd
-        text: Home
 
 execute:
   echo: false
@@ -21,3 +15,4 @@ format:
     theme: cosmo
     toc: true
     toc-depth: 3
+    css: styles.css
