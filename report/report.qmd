@@ -1,0 +1,1078 @@
+---
+title: "On the Effects of Government Medical Spending and Health Personnel On HIV Spread"
+format: pdf
+jupyter: python3
+execute:
+  eval: true
+  message: false
+  warning: false
+  echo: false
+---
+
+<style>
+figcaption {
+  text-align: center;
+  font-weight: bold;
+}
+</style>
+David Jiang
+```{python}
+#| label: setup
+import pandas as pd
+import numpy as np
+import requests
+from io import StringIO
+import re
+import json
+import time
+from plotnine import *
+import warnings
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+from statsmodels.stats.weightstats import ttest_ind
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
+from matplotlib.ticker import MultipleLocator
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split, KFold, cross_val_score, RandomizedSearchCV
+from sklearn.metrics import accuracy_score, mean_squared_error, r2_score, confusion_matrix, ConfusionMatrixDisplay, precision_score, recall_score, f1_score, roc_curve, roc_auc_score
+import plotly.express as px
+from xgboost import XGBRegressor
+from joblib import Parallel, delayed
+warnings.filterwarnings('ignore')
+```
+```{python}
+# This block is to obtain the indicator list, to find which indicators to viable to use
+BASE_URL = 'https://ghoapi.azureedge.net/api/'
+
+# Features of interest
+# Note that these are the only features of interest I found that I could retrieve data for using the API
+foi = ['Number of new HIV infections', 'Domestic general government health expenditure (GGHE-D) as percentage of general government expenditure (GGE) (%)']
+
+# Indicators in JSON format
+inds_json = requests.get(BASE_URL + 'Indicator', params={"page": "1"}, timeout=30).json()
+```
+```{python}
+# This block is to obtain the codes of the indicators of interest
+
+#Indicators
+inds = pd.DataFrame(list(inds_json.values())[1])
+
+#Information on features of interest
+fois = inds[inds['IndicatorName'].isin(foi)]
+
+# Indicator codes for the indicators of interest
+foi_codes = fois['IndicatorCode']
+```
+```{python}
+# This block is to perform the API calls to obtain the data on the features of interest
+jsons = []
+for code in foi_codes:
+    req = requests.get(BASE_URL + code, timeout=300)
+    assert(req.status_code == 200)
+    jsons.append(req.json())
+    time.sleep(0.1)
+```
+```{python}
+# This block is to wrangle the API data
+drop_cols = ['Id', 'SpatialDimType', 'TimeDimType', 'ParentLocationCode', 'Dim1Type', 'Dim1', 'Dim2Type', 'Dim2', 'Dim3Type', 'Dim3', 'DataSourceDimType', 'DataSourceDim', 'Value', 'Low', 'High', 'Comments', 'Date', 'TimeDimensionValue', 'TimeDimensionBegin', 'TimeDimensionEnd']
+
+dfs = {}
+for i in range(len(jsons)):
+    df = pd.DataFrame(list(pd.DataFrame(jsons[i])['value'])).drop(drop_cols, axis=1)
+    indicator = df['IndicatorCode'].unique()[0]
+    dfs[indicator] = df.rename(columns={"SpatialDim": "country", "ParentLocation": "region", "TimeDim": "year"}).drop(['IndicatorCode'], axis=1)
+dfs['HIV_0000000026'].rename(columns={"NumericValue": "new_cases"}, inplace=True)
+dfs['GHED_GGHE-DGGE_SHA2011'].rename(columns={"NumericValue": "health_expense_percent"}, inplace=True)
+df = pd.merge(dfs['HIV_0000000026'], dfs['GHED_GGHE-DGGE_SHA2011'], on=['country', 'region', 'year'], how='left')
+```
+```{python}
+# This block is to parse and wrangle the CSV data
+df_doc = pd.read_csv("./doctors_10k.csv")
+df_nurse = pd.read_csv("./nursery_midwife_10k.csv")
+df_pharm = pd.read_csv("./pharmacists_10k.csv")
+csv_dfs = [df_doc, df_nurse, df_pharm]
+drop_cols = ['ValueType', 'ParentLocationCode', "Location type", "Location", 'Period type', 'IsLatestYear', 'Dim1', 'Dim2', 'Dim3', 'Dim1ValueCode', 'Dim2ValueCode', 'Dim3ValueCode', 'Dim1 type', 'Dim2 type', 'Dim3 type', 'DataSourceDimValueCode', 'DataSource', 'FactValueNumericPrefix', 'FactValueUoM', 'FactValueNumeric', 'FactValueNumericLow', 'FactValueNumericLowPrefix', 'FactValueNumericHigh', 'FactValueNumericHighPrefix', 'DateModified', 'Language', 'FactComments', 'FactValueTranslationID', 'Indicator']
+
+dfs = {}
+for df_csv in csv_dfs:
+    cleaned = df_csv.drop(drop_cols, axis=1)
+    indicator = cleaned['IndicatorCode'].unique()[0]
+    dfs[indicator] = cleaned.rename(columns={"SpatialDimValueCode": "country", "ParentLocation": "region", "Period": "year"}).drop(['IndicatorCode'], axis=1)
+
+# HWF_0001 doctors, 0006 nurses/midwives, 0014 pharmacists
+dfs['HWF_0001'].rename(columns={"Value": "doctor_10k"}, inplace=True)
+dfs['HWF_0006'].rename(columns={"Value": "nurse_10k"}, inplace=True)
+dfs['HWF_0014'].rename(columns={"Value": "pharm_10k"}, inplace=True)
+for new_df in dfs:
+    df = pd.merge(df, dfs[new_df], on=['country', 'region', 'year'], how='left')
+```
+
+## Introduction
+The motivation behind this analysis is to investigate whether it is worthwhile for a country to invest more into the health sector to reduce the spread of HIV. The dataset used for this purpose is the World Health Organization's (WHO) Global Health Observatory's (GHO) data. The focus of the data obtained from this dataset will be on HIV data, health personnel data, and economic data, specifically economic data as a whole and for health/medical related uses. The question is whether health/medical spendings and personnel affect the spread of HIV, and if so, by how much. The hypothesis is that these factors do indeed affect the spread of HIV, especially the spendings. The result of this analysis can help governments determine how much they should spend on the medical sector if they wish to reduce the spread of HIV in their country. 
+
+## Methods
+First, a general list of indicators were queried using WHO's GBO's API. Then, the list was inspected and indicators useful for analysing the key question were selected. The indicators were chosen if they were related to government spending or to health personnel. Since there is a lot of missing data for personnel indicators, only indicators for the three core personnel types were chosen, aside from government medical spending indicators. These included doctors, nurses and midwives, and pharmacists. Furthermore, to keep things proportionate, the number of such personnel per 10,000 population was used instead of total count, as some countries may have less overall but the same in proportion.
+The data for number of new HIV infections and domestic general government health expenditure as percentage of general government expenditure were obtained directly from WHO's GBO via the API. However, API queries for other indicators of interest responded successfully (status code 200), but contained no data. As such, the information has been retrieved in the form of CSV files.
+The data's features were then inspected, and all unnecessary columns and columns with no data were dropped. Unnecessary columns included ones such as redundant information (there were several columns giving the same date/time information) and identifiers (IDs). This left only the country, region, year, and indicators. After merging the data into one data frame using left joins, there were 5095 entries total with 8 columns. Each row contains information on the indicators for one country for one specific year. Note that the regions include but are not the same as the continents. Specifically, the regions are: Eastern Mediterranean, Africa, Europe, Americas, Western Pacific, and South-East Asia. 
+Then, to understand the global trend of the data, a plot contrasting the spendings, new cases, and year of each country was made. This plot can be seen as an interactive visualization on the webpage as Figure 1, this is not to be confused with Figure 1 in this report.
+Finally, to deal with missing data, much analysis was performed, including via linear regression, to see whether each indicator should be dropped. The analysis is mostly checking the statistical significance of each indicator when fitting them to a linear model. The results will be explained more in depth in the results section. 
+I then decided to perform a linear imputation of the missing data, as there would be a strong lack of training data otherwise. A more detailed explanation for doing this can be seen in the results section. 
+
+Then the data was split via by an 80 to 20 ratio of training/validation to testing, and then modelled by XGBoost, linear regression, and random forest regressor. The models will use the number of new cases (new_cases) as the response variable and the health expense and personnel indicators as predictors. Each model had four variants, differing by the indicators used in their training. There was one with all indicators, one with nurse count dropped, one with the health expense dropped, and one where the core personnel count was aggregated into one total value instead of spread over several. The reason for this was to deal with potential multicollinearity between the amounts of different personnel.
+The hyperparameters will be tuned via a 5 fold cross validation. 
+The XGBoost resgressor is a model that performs gradient boosting, parallelised via trees. It includes regularization and many other optimization methods to fit to the data while trying to avoid overfitting. Key hyperparameters of this model include the number of estimators, the depth of the tree, the learning rate, and possible early stops.
+The random forest regressor uses the average of multiple decision trees to give a value to a point. Since each decision tree was made by subsetting different features at each split, they are different from each other. Key hyperparameters include the maximum number of features to consider, the minimum number of samples per leaf, and the number of estimators. 
+The linear regressor is the baseline model used. It uses the ordinary least squares method to minimize the residual sum of squares between the observed data and the predicted values. 
+Key statistics to be used in comparing the models and testing significance of features include the R$^2$, adjusted R$^2$, AIC, and RMSE. 
+Overall, to compare the three types of models, RMSE, R$^2$, and will be used. 
+
+## Results
+The first thing to analyze is the missing data. To do this, Figure 1 was generated. Based on the figure, there are quite a lot of missing values, with there being around 40-50% of the entries being missing for the health personnel. On top of that, there are around 26% of entries missing the new HIV cases value. With this in mind, I then checked the missing values based on year instead. From there, I noticed that years 1990-1999 have extremely high proportion of missing, plus the expenditure values for 2024. With this in mind, it was decided that the years 1990-1999 and 2024 would be dropped.
+Since it is impossible to analyze the years where a country has no data on the response variable, number of new cases, entries with no data on new cases were dropped. 
+
+```{python}
+#| fig-cap: "Figure 1: Missing entries for each feature"
+
+variables = [
+    "New HIV Cases",
+    "Health Exp. (% Gov.)",
+    "Doctors per 10 000",
+    "Nurses & Midwives per 10 000",
+    "Pharmacists per 10 000"
+]
+cols = ["new_cases", "health_expense_percent", "doctor_10k", "nurse_10k", "pharm_10k"]
+n_missing = [df[c].isna().sum() for c in cols]
+p_missing = [f"{100 * df[c].isna().sum() / len(df):.1f}%" for c in cols]
+
+fig, ax = plt.subplots(figsize=(8, 2.2))
+ax.axis("off")
+
+table = ax.table(
+    cellText=list(zip(variables, n_missing, p_missing)),
+    colLabels=["Feature", "Missing Entries Count", "Missing Entries in Percent (%)"],
+    loc="center",
+    cellLoc="center",
+)
+
+table.auto_set_font_size(False)
+table.set_fontsize(10)
+table.scale(1, 1.6)
+
+for col in range(3):
+    cell = table[0, col]
+    cell.set_facecolor("#2c2c2c")
+    cell.set_text_props(color="white", fontweight="bold")
+
+for row in range(1, len(variables) + 1):
+    bg = "#e4e4e4" if row % 2 == 0 else "white"
+    for col in range(3):
+        table[row, col].set_facecolor(bg)
+        table[row, col].set_edgecolor("#cccccc")
+
+for row in range(1, len(variables) + 1):
+    table[row, 0].get_text().set_ha("left")
+
+plt.tight_layout()
+plt.show()
+```
+After checking the proportion of data still missing, Figures 2 and 3 reveal that the main issue in the high amount of missing data for the features remain. Figure 3 in particular shows the higher number of missing data in Africa.
+```{python}
+# Drop 1990-1999 and 2024 due to high number of missing entries
+df = df[~df['year'].between(1990, 1999) & (df['year'] != 2024)]
+df.dropna(subset=['new_cases'], inplace=True)
+```
+```{python}
+#| fig-cap: "Figure 2: Missing entries for each feature, after dropping entries with missing new HIV cases, as well as filtering for years 2000-2023"
+
+variables = [
+    "New HIV Cases",
+    "Health Exp. (% Gov.)",
+    "Doctors per 10 000",
+    "Nurses & Midwives per 10 000",
+    "Pharmacists per 10 000"
+]
+cols = ["new_cases", "health_expense_percent", "doctor_10k", "nurse_10k", "pharm_10k"]
+n_missing = [df[c].isna().sum() for c in cols]
+p_missing = [f"{100 * df[c].isna().sum() / len(df):.1f}%" for c in cols]
+
+fig, ax = plt.subplots(figsize=(8, 2.2))
+ax.axis("off")
+
+table = ax.table(
+    cellText=list(zip(variables, n_missing, p_missing)),
+    colLabels=["Feature", "Missing Entries Count", "Missing Entries in Percent (%)"],
+    loc="center",
+    cellLoc="center",
+)
+
+table.auto_set_font_size(False)
+table.set_fontsize(10)
+table.scale(1, 1.6)
+
+for col in range(3):
+    cell = table[0, col]
+    cell.set_facecolor("#2c2c2c")
+    cell.set_text_props(color="white", fontweight="bold")
+
+for row in range(1, len(variables) + 1):
+    bg = "#e4e4e4" if row % 2 == 0 else "white"
+    for col in range(3):
+        table[row, col].set_facecolor(bg)
+        table[row, col].set_edgecolor("#cccccc")
+
+for row in range(1, len(variables) + 1):
+    table[row, 0].get_text().set_ha("left")
+
+plt.tight_layout()
+plt.show()
+```
+```{python}
+#| fig-cap: "Figure 3: Number of missing entries for each region, for each feature"
+cols = ["new_cases", "health_expense_percent", "doctor_10k", "nurse_10k", "pharm_10k"]
+col_labels = ["New HIV Cases", "Health Exp. (% Gov.)", "Doctors / 10k", "Nurses / 10k", "Pharmacists / 10k"]
+
+regions = sorted(df["region"].dropna().unique())
+cell_data = []
+for region in regions:
+    sub = df[df["region"] == region]
+    cell_data.append([region] + [str(sub[c].isna().sum()) for c in cols])
+
+n_cols = len(col_labels) + 1
+fig, ax = plt.subplots(figsize=(10, len(regions) * 0.38 + 0.8))
+ax.axis("off")
+
+table = ax.table(
+    cellText=cell_data,
+    colLabels=["Region"] + col_labels,
+    loc="center",
+    cellLoc="center",
+)
+
+table.auto_set_font_size(False)
+table.set_fontsize(9)
+table.scale(1, 1.5)
+
+for col in range(n_cols):
+    cell = table[0, col]
+    cell.set_facecolor("#2c2c2c")
+    cell.set_text_props(color="white", fontweight="bold")
+
+for row_idx, region in enumerate(regions):
+    bg = "#f2f2f2" if row_idx % 2 == 0 else "white"
+    sub = df[df["region"] == region]
+    for col_idx in range(n_cols):
+        cell = table[row_idx + 1, col_idx]
+        cell.set_edgecolor("#cccccc")
+        cell.set_facecolor(bg)
+        if col_idx == 0:
+            cell.get_text().set_ha("left")
+
+plt.tight_layout()
+plt.show()
+```
+```{python}
+# Regions, not countries. Except for venezuela (VEN) and 
+# Saint Kitts and Nevis (KNA), which simply lack all information
+# on pharmacists
+EXCLUDE_REGIONS = {"GLOBAL", "EUR", "EMR", "AFR", "AMR", "SEAR", "WPR", "VEN", "KNA"}
+df = df[~df["country"].isin(EXCLUDE_REGIONS)].reset_index(drop=True)
+```
+At this point, a few more checks showed that Venezuela and Saint Kitts and Nevis in particular are missing all of their data on pharmacists, as such, the decision was made to exclude them from future analysis. 
+I then decided to fit several models to check whether any of the features could be dropped due to low significance. The results are shown in Figure 4. We can see that when any of the personnel features are dropped, government health expenses becomes no longer significant at the 0.05 level. However, in the full model, all features appear to be significant at the 0.05 level. Comparing the r-squared, there does not appear to be any significant difference for any of the models. Furthermore, in the last model, the one with only personnel data, both the nurse/midwives and pharmacist features are no longer significant at the 0.05 level. 
+Furthermore, the proportion of nurses seems to universally have the smallest effect on the spread of HIV incomparison to the other personnel. 
+While it makes sense that the coefficients of each personnel is negative, indicating that more personnel leads to a reduced spread, the health expense is always positive, which indicates that more spending leads to a greater spread, this is counterintuitive. 
+```{python}
+#| fig-cap: "Figure 4: Tables comparing the performance and significance of 5 different models, each with a different feature excluded except for the first."
+
+# This block is to compare the performance of models with and without certain features, to see if any of them are not statistically significant
+features  = ["health_expense_percent", "doctor_10k", "nurse_10k", "pharm_10k"]
+drop_cols = ["doctor_10k", "nurse_10k", "pharm_10k", "health_expense_percent"]
+
+models = {"All features": features}
+for col in drop_cols:
+    models[f"Drop {col}"] = [f for f in features if f != col]
+
+clean = df.dropna(subset=["new_cases"] + features)
+
+fits = {}
+for name, feats in models.items():
+    formula = "new_cases ~ " + " + ".join(feats)
+    fits[name] = smf.ols(formula, data=clean).fit()
+
+fig, axes = plt.subplots(len(fits), 1, figsize=(10, len(fits) * 2.4))
+fig.suptitle("Linear Regression Results", fontweight="bold", fontsize=12, y=1.01)
+
+for ax, (name, fit) in zip(axes, fits.items()):
+    ax.axis("off")
+
+    coef_df = pd.DataFrame({
+        "Term":    fit.params.index,
+        "Coef":    fit.params.values,
+        "Std Err": fit.bse.values,
+        "t":       fit.tvalues.values,
+        "p-value": fit.pvalues.values
+    })
+
+    def fmt(v): return f"{v:.4f}"
+    cell_text = [
+        [row["Term"], fmt(row["Coef"]), fmt(row["Std Err"]),
+         fmt(row["t"]), fmt(row["p-value"])]
+        for _, row in coef_df.iterrows()
+    ]
+
+    col_labels = ["Term", "Coef", "Std Err", "t", "p-value"]
+    table = ax.table(cellText=cell_text, colLabels=col_labels,
+                     loc="center", cellLoc="center")
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    table.scale(1, 1.5)
+
+    for col in range(len(col_labels)):
+        table[0, col].set_facecolor("#2c2c2c")
+        table[0, col].set_text_props(color="white", fontweight="bold")
+
+    for row in range(1, len(cell_text) + 1):
+        bg = "#f2f2f2" if row % 2 == 0 else "white"
+        p  = float(coef_df.iloc[row - 1]["p-value"])
+        for col in range(len(col_labels)):
+            table[row, col].set_facecolor("#fce8e8" if p < 0.05 and col == 4 else bg)
+            table[row, col].set_edgecolor("#cccccc")
+
+    r2  = f"{fit.rsquared:.4f}"
+    aic = f"{fit.aic:.2f}"
+    ax.set_title(f"{name}   |   R² = {r2}   AIC = {aic}",
+                 fontsize=10, fontweight="bold", loc="left", pad=8)
+
+plt.tight_layout()
+plt.show()
+```
+Based on these values, it is a concern that there could be significant multicollinearity among the features, so VIF was used to compare the features, which are displayed in Figure 5. Based on the results, there is indeed significant multicollinearity, but not severely so, as the values are around 5-7. To reduce the multicollinearity, I then decided to fit a model that only takes in the total personnel within the three categories per 10 000 people. The results, displayed in Figure 6, show that the health expenditure is not statistically significant at the 0.05 level when using the total personnel count. This makes sense, as a sizable sum of a government's health sector expenditure is likely towards the personnel. 
+```{python}
+#| fig-cap: "Figure 5: Table to show the VIF values for each feature"
+
+# This block is to compute the VIF values for each feature
+X = df[["health_expense_percent","doctor_10k","nurse_10k","pharm_10k"]].dropna(inplace=False)
+vif_data = pd.DataFrame({
+    "Feature": features,
+    "VIF":     [round(variance_inflation_factor(X.values, i), 4) for i in range(X.shape[1])]
+})
+
+fig, ax = plt.subplots(figsize=(5, 1.8))
+ax.axis("off")
+
+table = ax.table(
+    cellText=vif_data.values.tolist(),
+    colLabels=["Feature", "VIF"],
+    loc="center",
+    cellLoc="center",
+)
+
+table.auto_set_font_size(False)
+table.set_fontsize(10)
+table.scale(1, 1.6)
+
+for col in range(2):
+    table[0, col].set_facecolor("#2c2c2c")
+    table[0, col].set_text_props(color="white", fontweight="bold")
+
+for row in range(1, len(features) + 1):
+    bg = "#f2f2f2" if row % 2 == 0 else "white"
+    vif_val = vif_data.iloc[row - 1]["VIF"]
+    for col in range(2):
+        table[row, col].set_facecolor("#fce8e8" if vif_val > 5 and col == 1 else bg)
+        table[row, col].set_edgecolor("#cccccc")
+
+plt.tight_layout()
+plt.show()
+```
+```{python}
+#| fig-cap: "Figure 6: Table showing the metrics of a linear regression model that uses the total personnel across the three categories plus the health expense."
+
+df["personnel_10k"] = df["doctor_10k"] + df["nurse_10k"] + df["pharm_10k"]
+
+clean = df.dropna(subset=["new_cases", "health_expense_percent", "personnel_10k"])
+fit   = smf.ols("new_cases ~ health_expense_percent + personnel_10k", data=clean).fit()
+
+coef_df = pd.DataFrame({
+    "Term":    fit.params.index,
+    "Coef":    fit.params.round(4),
+    "p-value": fit.pvalues.round(4),
+}).reset_index(drop=True)
+
+summary_df = pd.DataFrame({
+    "Metric": ["R²", "Adj. R²", "AIC"],
+    "Value":  [f"{fit.rsquared:.4f}", f"{fit.rsquared_adj:.4f}", f"{fit.aic:.2f}"],
+})
+
+fig, axes = plt.subplots(1, 1, figsize=(9, 2))
+
+axes.axis("off")
+table = axes.table(cellText=summary_df.values.tolist(),
+                    colLabels=summary_df.columns.tolist(),
+                    loc="center", cellLoc="center")
+table.auto_set_font_size(False)
+table.set_fontsize(10)
+table.scale(1, 1.6)
+
+for col in range(len(summary_df.columns)):
+    table[0, col].set_facecolor("#2c2c2c")
+    table[0, col].set_text_props(color="white", fontweight="bold")
+
+for row in range(1, len(summary_df) + 1):
+    bg = "#f2f2f2" if row % 2 == 0 else "white"
+    for col in range(len(summary_df.columns)):
+        table[row, col].set_facecolor(bg)
+        table[row, col].set_edgecolor("#cccccc")
+
+plt.tight_layout()
+plt.show()
+```
+From here, I then decided to impute linearly much of the originally missing values and refit the models. The imputations are done on a country by country basis, using the most recent existing years with data to impute. In terms of the r-squared, proportionally speaking, removing the doctor count reduces the performance to a more noticable degree than removing other features. Also notably, with the exception of nurse/midwife and pharmacist counts, other features are shown as non-significant in any model when using the imputed data. Even pharmacist count was only statistically insignificant when health expenditure was excluded as a feature. Though there is a decrease in r-squared when compared to the models not using the imputed dataset.
+The four subsets of features were chosen based on this.
+```{python}
+# This block is to impute missing values by assuming that the data follows a linear trend within a country over time
+worker_cols = ["health_expense_percent", "doctor_10k", "nurse_10k", "pharm_10k"]
+df_imputed = df.copy().sort_values(['country', 'year'])
+
+for col in worker_cols:
+    df_imputed[col] = (
+        df_imputed.groupby("country")[col]
+        .transform(lambda x: x.interpolate(method="linear", limit_direction='both'))
+    )
+```
+```{python}
+# The code is kept here should you wish to run it and see the actual values. Simply uncomment the for loop at the end to print the results.
+# The printed results were left out of the report for brevity and readability.
+df_imputed["personnel_10k"] = df_imputed["doctor_10k"] + df_imputed["nurse_10k"] + df_imputed["pharm_10k"]
+
+all_features = ["health_expense_percent", "doctor_10k", "nurse_10k", "pharm_10k"]
+drop_cols = ["doctor_10k", "nurse_10k", "pharm_10k", "health_expense_percent"]
+
+model_specs = {"All features": all_features}
+for col in drop_cols:
+    model_specs[f"Drop {col}"] = [f for f in all_features if f != col]
+model_specs["personnel_10k"] = ["health_expense_percent", "personnel_10k"]
+
+fits = {}
+for name, feats in model_specs.items():
+    clean = df_imputed.dropna(subset=["new_cases"] + feats)
+    fits[name] = smf.ols("new_cases ~ " + " + ".join(feats), data=clean).fit()
+
+'''
+for (name, fit) in fits.items():
+    print(
+        f"{name}   |   R² = {fit.rsquared:.4f}   Adj. R² = {fit.rsquared_adj:.4f}   AIC = {fit.aic:.2f}"
+    )
+'''
+```
+```{python}
+# This block is to setup all required information and functions
+# needed to train the models
+# Feature variants
+RESPONSE = "new_cases"
+
+VARIANTS = {
+    "All Features": ["health_expense_percent", "doctor_10k", "nurse_10k", "pharm_10k"],
+    "Nurse Dropped": ["health_expense_percent", "doctor_10k", "pharm_10k"],
+    "Health Expense Dropped": ["doctor_10k", "nurse_10k", "pharm_10k"],
+    "Personnel Aggregated": ["health_expense_percent", "personnel_10k"],
+}
+
+# Cross-validation setup
+CV = KFold(n_splits=5, shuffle=True, random_state=42)
+N_JOBS = -1
+OUTER_CV = KFold(n_splits=5, shuffle=True, random_state=42)
+INNER_CV = KFold(n_splits=3, shuffle=True, random_state=0)
+N_ITER = 30 
+N_JOBS = -1
+RANDOM_STATE = 42
+train_df, test_df = train_test_split(df_imputed, test_size=0.2, random_state=42)
+train_df = train_df.reset_index(drop=True)
+test_df  = test_df.reset_index(drop=True)
+
+# hyperparameter choices
+XGB_PARAM_DIST = {
+    "n_estimators": [100, 200, 300, 500],
+    "learning_rate": [0.01, 0.05, 0.1, 0.2],
+    "max_depth": [3, 5, 8],
+    "subsample": [0.6, 0.8, 1.0],
+    "colsample_bytree": [0.6, 0.8, 1.0],
+    "min_child_weight": [2, 4, 6, 8],
+    "gamma": [0, 0.1, 0.3, 0.5],
+    "reg_lambda": [0.5, 1.0, 2.0, 5.0],
+}
+ 
+RF_PARAM_DIST = {
+    "n_estimators": [100, 200, 300, 500],
+    "max_depth": [None, 5, 10, 20, 30],
+    "min_samples_split": [2, 5, 10],
+    "min_samples_leaf": [1, 2, 4, 8],
+    "max_features": ["sqrt", "log2", 0.5, 0.8],
+    "bootstrap": [True, False],
+}
+
+# sklearn and xgb runner
+def run_sklearn_cv(model_name, variant_name, features):
+    X = train_df[features].values
+    y = train_df[RESPONSE].values
+
+    if model_name == "XGBRegressor":
+        base_model = XGBRegressor(random_state=RANDOM_STATE, n_jobs=1, verbosity=0)
+        param_dist = XGB_PARAM_DIST
+    else:
+        base_model = RandomForestRegressor(random_state=RANDOM_STATE, n_jobs=1)
+        param_dist = RF_PARAM_DIST
+
+    tuned_model = RandomizedSearchCV(
+        estimator=base_model,
+        param_distributions=param_dist,
+        n_iter=N_ITER,
+        cv=INNER_CV,
+        scoring="neg_root_mean_squared_error",
+        refit=True,
+        random_state=RANDOM_STATE,
+        n_jobs=N_JOBS,
+    )
+
+    rmse_scores = cross_val_score(
+        tuned_model, X, y,
+        cv=OUTER_CV,
+        scoring="neg_root_mean_squared_error",
+        n_jobs=1,
+    )
+    r2_scores = cross_val_score(
+        tuned_model, X, y,
+        cv=OUTER_CV,
+        scoring="r2",
+        n_jobs=1,
+    )
+
+    return {
+        "model": model_name,
+        "variant": variant_name,
+        "cv_rmse_mean": -rmse_scores.mean(),
+        "cv_rmse_std": rmse_scores.std(),
+        "cv_r2_mean": r2_scores.mean(),
+    }
+
+# OLS runner
+def run_ols_cv(variant_name, features):
+    data = train_df[features + [RESPONSE]].copy().reset_index(drop=True)
+    formula = f"{RESPONSE} ~ " + " + ".join(features)
+
+    fold_rmses, fold_r2s = [], []
+    for train_idx, val_idx in OUTER_CV.split(data):
+        train_data = data.iloc[train_idx]
+        val_data = data.iloc[val_idx]
+
+        fit = smf.ols(formula, data=train_data).fit()
+        preds = fit.predict(val_data)
+
+        y_true = val_data[RESPONSE].values
+        y_pred = preds.values
+
+        fold_rmses.append(np.sqrt(mean_squared_error(y_true, y_pred)))
+        r2 = r2_score(y_true, y_pred)
+        fold_r2s.append(r2)
+
+    return {
+        "model": "OLS",
+        "variant": variant_name,
+        "cv_rmse_mean": np.mean(fold_rmses),
+        "cv_rmse_std": np.std(fold_rmses),
+        "cv_r2_mean": np.mean(fold_r2s),
+    }
+    
+# To setup for sklearn and xgb
+sklearn_jobs = [
+    (mn, vn, ft)
+    for mn in ("XGBRegressor", "RandomForestRegressor")
+    for vn, ft in VARIANTS.items()
+]
+```
+```{python}
+sklearn_results = Parallel(n_jobs=N_JOBS, backend="threading", verbose=0)(
+    delayed(run_sklearn_cv)(mn, vn, ft) for mn, vn, ft in sklearn_jobs
+)
+```
+```{python}
+ols_results = Parallel(n_jobs=N_JOBS, backend="threading", verbose=0)(
+    delayed(run_ols_cv)(vn, ft) for vn, ft in VARIANTS.items()
+)
+```
+```{python}
+# To aggregate the results
+results_df = (
+    pd.DataFrame(sklearn_results + ols_results)
+    .sort_values(["model", "cv_rmse_mean"])
+    .reset_index(drop=True)
+)
+```
+```{python}
+# Extract best hyperparameters per model based on rmse
+# find the best-performing variant for each sklearn model
+best_variants = (
+    results_df[results_df["model"] != "OLS"]
+    .groupby("model")
+    .apply(lambda g: g.loc[g["cv_rmse_mean"].idxmin()])
+    .reset_index(drop=True)
+    [["model", "variant"]]
+)
+# Uncomment to see details on best hyperparameters
+'''
+print("── Best variant per model ───────────────────────────────────────────────")
+print(best_variants.to_string(index=False))
+
+for _, row in best_variants.iterrows():
+    model_name = row["model"]
+    variant_name = row["variant"]
+    features = VARIANTS[variant_name]
+
+    X = df_imputed[features].values
+    y = df_imputed[RESPONSE].values
+
+    if model_name == "XGBRegressor":
+        base_model = XGBRegressor(random_state=RANDOM_STATE, n_jobs=1, verbosity=0)
+        param_dist = XGB_PARAM_DIST
+    else:
+        base_model = RandomForestRegressor(random_state=RANDOM_STATE, n_jobs=1)
+        param_dist = RF_PARAM_DIST
+
+    search = RandomizedSearchCV(
+        estimator=base_model,
+        param_distributions=param_dist,
+        n_iter=N_ITER,
+        cv=INNER_CV,
+        scoring="neg_root_mean_squared_error",
+        refit=True,
+        random_state=RANDOM_STATE,
+        n_jobs=N_JOBS,
+    )
+    search.fit(X, y)
+
+    print(f"\n── Best hyperparameters for {model_name} / {variant_name} ──────────────")
+    for param, value in search.best_params_.items():
+        print(f"  {param}: {value}")
+    print(f"  (inner CV RMSE: {-search.best_score_:.4f})")
+'''
+```
+```{python}
+# refit optimal models and perform testing on the random forest, which was ultimately chosen
+rfr_model = RandomForestRegressor(
+    n_estimators=500,
+    min_samples_split=2,
+    min_samples_leaf=2,
+    max_features="sqrt",
+    max_depth=20,
+    bootstrap=False
+)
+xgb_model = XGBRegressor(
+    subsample=0.6,
+    reg_lambda=1,
+    n_estimators=500,
+    min_child_weight=4,
+    max_depth=8,
+    learning_rate=0.1,
+    gamma=0.5,
+    colsample_bytree=1
+)
+ols_model = smf.ols('new_cases ~ health_expense_percent + doctor_10k + nurse_10k + pharm_10k', data=train_df).fit()
+X_train = train_df[VARIANTS['All Features']]
+y_train = train_df[RESPONSE]
+X_test = test_df[VARIANTS['All Features']]
+y_test = test_df[RESPONSE]
+rfr_model.fit(X_train, y_train)
+xgb_model.fit(X_train, y_train)
+y_pred = rfr_model.predict(X_test)
+test_rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+test_r2 = r2_score(y_test, y_pred)
+# Uncomment to output the results. I left this part out of rendering. Note that I did use information from here in the actual analysis.
+'''
+print(f"\nTest RMSE: {test_rmse}")
+print(f"Test R-squared: {test_r2}")
+'''
+```
+```{python}
+#| fig-cap: "Figure 7: Feature importances for the XGB model."
+importance_df = pd.DataFrame({
+    "feature":    VARIANTS['All Features'],
+    "importance": xgb_model.feature_importances_
+}).sort_values("importance", ascending=False).reset_index(drop=True)
+(
+    ggplot(importance_df, aes(x="reorder(feature, importance)", y="importance"))
+    + geom_col(fill="steelblue")
+    + coord_flip()
+    + theme_minimal()
+    + labs(
+        title="XGBoost Feature Importance (Gain)",
+        x="Feature",
+        y="Importance",
+    )
+    + theme(axis_text=element_text(size=11))
+)
+```
+```{python}
+#| fig-cap: "Figure 8: Feature importances for the Random Forest model."
+rf_importances = rfr_model.feature_importances_
+
+imp_df = pd.DataFrame({
+    'feature': VARIANTS['All Features'],
+    'importance': rf_importances
+}).sort_values('importance')
+imp_df['feature'] = pd.Categorical(imp_df['feature'], categories=imp_df['feature'])
+
+(
+    ggplot(imp_df, aes(x="feature", y="importance")) +
+    geom_col() +
+    coord_flip() +
+    labs(x="Feature", y="Importance")
+)
+```
+Figure 2 on the webpage show the result of the modeling. When comparing the three types of models, we see that the baseline linear regression performs quite poorly in comparison to the random forest and XGBoost models when using either the RMSE or R$^2$ as the metric. It is also evident that among the four variants of each model, aggregating the personnel information causes the model to perform far more poorly, which indicates that the information lost from the aggregation has a greater impact than the reduction of multicollinearity from merging the features into one. Aside from that, the models with all features also performs a touch better than when removing the nurse proportion or removing the health expenses, when using either metrics, which makes sense considering such a model would have more information. 
+Based on the residual plot show in Figure 3 on the webpage, we see that the linear regression model ends up over predicting the values by a large margin, while the other two have much less extreme values. The systematic patterns of the errors also indicates that a transformation, perhaps via the log function, would help improve the models. Regardless, each model struggles to predict large values.
+From the predicted versus actual plot shown in Figure 4 on the webpage, we can see that the XGB model tends to do slightly better than the random forest on larger values, but appears to over predict the smaller values, as can be seen by the cluster above the dashed line near 0. The dashed line indicates where the points would be if the prediction and actual value coincided, meaning that the closer the value is to the dashed line, the more accurate that prediction was. 
+Then, Figure 7 was plotted to show the feature importances given by the XGB model. We can see from here that the health expenditure proportion has the least impact on the model's predictions, while the proportion of doctors, pharmacists, and nurses/midwives have, in that order, the most to least importance for the predictions. Figure 8, generated from the random forest model, shows a similar trend in that the least important feature is the health expense, though for the random forest, the proportion of doctors is slightly less important, putting it as the second most important by a narrow margin compared to the the proportion of pharmacists. 
+The rankings for the XGB model makes sense, and the random forest model's does too, to a lesser extent. Intuitively, the proportion of doctors to population is an indicator of a country's medical spending and extensiveness of their health infrastructure. However, less intuitively, the random forest ranks pharmacists roughly just as importantly as doctors. This perhaps has to do with a nation's wealth and scietific development of their medical field. Pharmacists are more useful when a nation has the wealth to invest in drug research, purchase, and/or development. When these are not present, a country would likely not see as much of a point in investing into more pharmacists, preferring to put the spendings into other things. Lastly, the low ranking of the importance of health expenses is likely because health expenses encompasses too many items, and as such has too much noise in the data for the model to make good use of it, in comparison to the number of doctors. Furthermore, a sizeable portion of a nation's health spendings are liekly on these 3 core personnel, so much of the information is included already in other features, making heatlh expenses less useful. 
+Since keeping all features results in a better model both based on RMSE and R$^2$, as well as that the random forest model performs slightly better than the XGB model by both metrics, the test set was ultimately run on the random forest model, yielding a test RMSE of around 14573 and a test R$^2$ of around 0.7872, in contrast to the RMSE of about 16734 and R$^2$ of about 0.8136 it achieved on the training set. The closeness of the R$^2$ and the smaller RMSE indicates that this model performs quite well on the test set as well. 
+
+## Conclusion
+Ultimately, the results of the models indicate that to reduce the spread of HIV, governments should focus their health sector expenditure on personnel, especially doctors and pharmacists. While HIV can indeed spread via births, it appears the the effect of nurses and midwives are limited in the bigger picture. 
+This analysis, however, is limited by the fact that the linear regression model performed quite poorly, as such, I am unable to conclude as to a rough number of how each 1 personnel increase would affect the spread. 
+The missing data also reduces the accuracy these models would have in the real world, as around 40-50% of the data were imputed linearly. Thus, should the real world trends not follow a linearly pattern, these imputations would cause the models to give in inconsistent results when compared to the real world. Furthermore, two countries, being Venezuela and Saint Kitts and Nevis were excluded from the data due to a complete lack of data on the number of pharmacists. This lack prevented even imputations, resulting in the models being less applicable to their countries. A log transformation of the response variables would have possibly also improved the models. However, this would reduce the interpretability of the models, which was why it was not performed here. 
+
+```{python}
+# All code blocks from this point on are for rendering the interactive graphs on the website.
+# The HTML of the graphs were rendered here and saved as a .html file to avoid the need to
+# retrain the model in the webpage.
+
+import plotly.graph_objects as go
+import numpy as np
+import plotly.io as pio
+metrics = {
+    "New Cases":              "new_cases",
+    "Health Expense (%)":     "health_expense_percent",
+    "Doctors per 10k":        "doctor_10k",
+    "Nurses per 10k":         "nurse_10k",
+    "Pharmacists per 10k":    "pharm_10k",
+}
+
+years = sorted(df_map["year"].unique())
+
+# build one trace per year per metric (only first metric/first year visible)
+traces = []
+for metric_label, metric_col in metrics.items():
+    for year in years:
+        sub = df_map[df_map["year"] == year]
+        traces.append(go.Choropleth(
+            locations=sub["country"],
+            z=sub[metric_col],
+            text=sub["country_name"],
+            customdata=sub[["new_cases", "health_expense_percent",
+                             "doctor_10k", "nurse_10k", "pharm_10k"]].values,
+            hovertemplate=(
+                "<b>%{text}</b><br>"
+                "New Cases: %{customdata[0]}<br>"
+                "Health Expense (%): %{customdata[1]}<br>"
+                "Doctors per 10k: %{customdata[2]}<br>"
+                "Nurses per 10k: %{customdata[3]}<br>"
+                "Pharmacists per 10k: %{customdata[4]}<br>"
+                "<extra></extra>"
+            ),
+            colorscale="Reds",
+            colorbar=dict(title=metric_label),
+            name=metric_label,
+            visible=(metric_label == "New Cases" and year == years[0]),
+        ))
+
+n_years   = len(years)
+n_metrics = len(metrics)
+
+# ── year slider steps ─────────────────────────────────────────────────────────
+# each metric has n_years traces; active metric block starts at metric_idx * n_years
+def make_slider_steps(active_metric_idx):
+    steps = []
+    for i, year in enumerate(years):
+        visible = [False] * (n_metrics * n_years)
+        visible[active_metric_idx * n_years + i] = True
+        steps.append(dict(
+            method="update",
+            args=[{"visible": visible}],
+            label=str(year),
+        ))
+    return steps
+
+# ── metric dropdown buttons ───────────────────────────────────────────────────
+dropdown_buttons = []
+for m_idx, (metric_label, _) in enumerate(metrics.items()):
+    visible = [False] * (n_metrics * n_years)
+    visible[m_idx * n_years] = True          # show first year of selected metric
+    dropdown_buttons.append(dict(
+        label=metric_label,
+        method="update",
+        args=[
+            {"visible": visible},
+            {"sliders": [dict(
+                active=0,
+                steps=make_slider_steps(m_idx),
+                x=0.0, xanchor="left",
+                y=0.0, yanchor="top",
+                len=1.0,
+            )]},
+        ],
+    ))
+
+fig = go.Figure(data=traces)
+
+fig.update_layout(
+    title="Health Indicators by Country",
+    geo=dict(showframe=False, showcoastlines=True, projection_type="natural earth"),
+    height=600,
+    updatemenus=[dict(
+        buttons=dropdown_buttons,
+        direction="down",
+        x=0.01, xanchor="left",
+        y=1.12, yanchor="top",
+        showactive=True,
+    )],
+    sliders=[dict(
+        active=0,
+        steps=make_slider_steps(0),
+        x=0.0, xanchor="left",
+        y=0.0, yanchor="top",
+        len=1.0,
+    )],
+)
+
+fig.write_html("./plots/fig1.html", full_html=False, include_plotlyjs="cdn")
+```
+```{python}
+from plotly.subplots import make_subplots
+
+def make_charts(group_by):
+    if group_by == "model":
+        groups   = results_df["model"].unique()
+        x_col    = "variant"
+        x_title  = "Feature Variant"
+        legend   = "Model"
+    else:
+        groups   = results_df["variant"].unique()
+        x_col    = "model"
+        x_title  = "Model"
+        legend   = "Feature Variant"
+
+    def build_fig(metric, title, y_title):
+        fig = go.Figure()
+        for grp in groups:
+            sub = results_df[results_df[group_by] == grp].sort_values(x_col)
+            fig.add_trace(go.Bar(
+                name=grp,
+                x=sub[x_col],
+                y=sub[metric],
+                text=sub[metric].round(4),
+                textposition="outside",
+            ))
+        fig.update_layout(
+            title=title,
+            xaxis_title=x_title,
+            yaxis_title=y_title,
+            barmode="group",
+            legend_title=legend,
+            template="plotly_white",
+            height=500,
+        )
+        return fig
+
+    return (
+        build_fig("cv_rmse_mean", f"CV RMSE — grouped by {group_by}", "RMSE (lower = better)"),
+        build_fig("cv_r2_mean",   f"CV R²  — grouped by {group_by}", "R² (higher = better)"),
+    )
+rmse_by_model,   r2_by_model   = make_charts("model")
+rmse_by_variant, r2_by_variant = make_charts("variant")
+
+fig = make_subplots(rows=1, cols=2, subplot_titles=["RMSE", "R²"])
+
+all_traces = []
+for trace in rmse_by_model.data:
+    fig.add_trace(trace, row=1, col=1)
+for trace in r2_by_model.data:
+    fig.add_trace(trace, row=1, col=2)
+
+n_model_traces = len(rmse_by_model.data) + len(r2_by_model.data)
+
+for trace in rmse_by_variant.data:
+    t = trace; t.visible = False; fig.add_trace(t, row=1, col=1)
+for trace in r2_by_variant.data:
+    t = trace; t.visible = False; fig.add_trace(t, row=1, col=2)
+
+n_total = len(fig.data)
+
+fig.update_layout(
+    template="plotly_white",
+    height=520,
+    updatemenus=[dict(
+        buttons=[
+            dict(
+                label="Group by Model",
+                method="update",
+                args=[{"visible": [i < n_model_traces for i in range(n_total)]}],
+            ),
+            dict(
+                label="Group by Features",
+                method="update",
+                args=[{"visible": [i >= n_model_traces for i in range(n_total)]}],
+            ),
+        ],
+        direction="down",
+        x=0.01, xanchor="left",
+        y=1.15, yanchor="top",
+    )],
+    barmode="group",
+)
+fig.write_html("./plots/fig2.html", full_html=False, include_plotlyjs="cdn")
+```
+
+```{python}
+features = VARIANTS['all']
+
+residuals_df = pd.concat([
+    pd.DataFrame({
+        "fitted":   ols_model.predict(test_df[features]),
+        "residual": test_df[RESPONSE].values - ols_model.predict(test_df[features]),
+        "model":    "OLS",
+    }),
+    pd.DataFrame({
+        "fitted":   rfr_model.predict(test_df[features]),
+        "residual": test_df[RESPONSE].values - rfr_model.predict(test_df[features]),
+        "model":    "Random Forest",
+    }),
+    pd.DataFrame({
+        "fitted":   xgb_model.predict(test_df[features]),
+        "residual": test_df[RESPONSE].values - xgb_model.predict(test_df[features]),
+        "model":    "XGBoost",
+    }),
+]).reset_index(drop=True)
+
+models = residuals_df["model"].unique()
+
+fig = go.Figure()
+
+for model in models:
+    sub = residuals_df[residuals_df["model"] == model]
+    fig.add_trace(go.Scatter(
+        x=sub["fitted"],
+        y=sub["residual"],
+        mode="markers",
+        marker=dict(color="steelblue", opacity=0.4, size=5),
+        name=model,
+        visible=(model == "OLS"),
+    ))
+
+fig.add_hline(y=0, line_dash="dash", line_color="red")
+
+fig.update_layout(
+    title="Residual Plot",
+    xaxis_title="Fitted Values",
+    yaxis_title="Residuals",
+    template="plotly_white",
+    height=500,
+    updatemenus=[dict(
+        buttons=[
+            dict(
+                label=model,
+                method="update",
+                args=[
+                    {"visible": [m == model for m in models]},
+                    {"title": f"Residual Plot — {model}"},
+                ],
+            )
+            for model in models
+        ],
+        direction="down",
+        x=0.01, xanchor="left",
+        y=1.12, yanchor="top",
+        showactive=True,
+    )],
+)
+
+fig.write_html("plots/fig3.html", full_html=False, include_plotlyjs="cdn")
+```
+```{python}
+actual_vs_pred_df = pd.concat([
+    pd.DataFrame({
+        "actual":    test_df[RESPONSE].values,
+        "predicted": ols_model.predict(test_df[features]),
+        "model":     "OLS",
+    }),
+    pd.DataFrame({
+        "actual":    test_df[RESPONSE].values,
+        "predicted": rfr_model.predict(test_df[features]),
+        "model":     "Random Forest",
+    }),
+    pd.DataFrame({
+        "actual":    test_df[RESPONSE].values,
+        "predicted": xgb_model.predict(test_df[features]),
+        "model":     "XGBoost",
+    }),
+]).reset_index(drop=True)
+
+models = actual_vs_pred_df["model"].unique()
+
+# perfect prediction line range
+axis_min = actual_vs_pred_df[["actual", "predicted"]].min().min()
+axis_max = actual_vs_pred_df[["actual", "predicted"]].max().max()
+
+fig = go.Figure()
+
+for model in models:
+    sub = actual_vs_pred_df[actual_vs_pred_df["model"] == model]
+    fig.add_trace(go.Scatter(
+        x=sub["actual"],
+        y=sub["predicted"],
+        mode="markers",
+        marker=dict(color="steelblue", opacity=0.4, size=5),
+        name=model,
+        visible=(model == "OLS"),
+    ))
+
+# perfect prediction line as a single shared trace
+fig.add_trace(go.Scatter(
+    x=[axis_min, axis_max],
+    y=[axis_min, axis_max],
+    mode="lines",
+    line=dict(color="red", dash="dash"),
+    name="Perfect Prediction",
+    showlegend=False,
+))
+
+n_model_traces = len(models)
+
+fig.update_layout(
+    title="Actual vs Predicted — OLS",
+    xaxis_title="Actual",
+    yaxis_title="Predicted",
+    template="plotly_white",
+    height=500,
+    updatemenus=[dict(
+        buttons=[
+            dict(
+                label=model,
+                method="update",
+                args=[
+                    # keep the perfect prediction line (last trace) always visible
+                    {"visible": [m == model for m in models] + [True]},
+                    {"title": f"Actual vs Predicted — {model}"},
+                ],
+            )
+            for model in models
+        ],
+        direction="down",
+        x=0.01, xanchor="left",
+        y=1.12, yanchor="top",
+        showactive=True,
+    )],
+)
+
+fig.write_html("plots/fig4.html", full_html=False, include_plotlyjs="cdn")
+```
