@@ -6,6 +6,9 @@ The analysis was done using regression models, using linear regression as a base
 
 ## Sources of Data
 [Nurse and Midwife Data](https://www.who.int/data/gho/data/indicators/indicator-details/GHO/nursing-and-midwifery-personnel-(per-10-000-population))
+
 [Medical Doctor Data](https://www.who.int/data/gho/data/indicators/indicator-details/GHO/medical-doctors-(per-10-000-population))
+
 [Pharmacist Data](https://www.who.int/data/gho/data/indicators/indicator-details/GHO/pharmacists-(per-10-000-population))
-API used: https://ghoapi.azureedge.net/api/
+
+[Documentation for the API used](https://www.who.int/data/gho/info/gho-odata-api)
