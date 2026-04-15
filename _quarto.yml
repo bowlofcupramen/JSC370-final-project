@@ -3,19 +3,13 @@ project:
   output-dir: docs
 
 website:
-  title: "COVID-19 & Health Indicators Analysis"
+  title: "HIV and Health Indicators Analysis"
   navbar:
     background: dark
     foreground: light
     left:
       - href: index.qmd
         text: Home
-      - href: eda.qmd
-        text: EDA
-      - href: models.qmd
-        text: Models
-      - href: results.qmd
-        text: Results
 
 execute:
   echo: false

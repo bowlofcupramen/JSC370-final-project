@@ -1,0 +1,23 @@
+[
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "On the Effects of Government Medical Spending and Health Personnel On HIV Spread",
+    "section": "",
+    "text": "Link to GitHub repository Link to the report ## Description\nThis project investigates the relationship between health system indicators and the spread of HIV across countries and years. The number of new cases annually is modeled by the healthcare spending (as a proportion of total spending, in percent), as well as medical doctors, nursing staff, and pharmacist density (as a number per 10 000 population). The data are obtained from the World Health Organization’s (WHO). The overall conclusion was that investing in more pharmacists and doctors have a greater impact then investing in more nurses and/or midwives, or by simply increasing the spending in the health sector in general. Though the amount of available data is a strong limitation of the applicability of the results to the real world. it can be taken into consideration when making decisions where the ultimate goal is to reduce the spread of HIV."
+  },
+  {
+    "objectID": "index.html#exploratory-data-analysis",
+    "href": "index.html#exploratory-data-analysis",
+    "title": "On the Effects of Government Medical Spending and Health Personnel On HIV Spread",
+    "section": "Exploratory Data Analysis",
+    "text": "Exploratory Data Analysis\nThe map below shows how the indicators and number of new HIV cases vary across countries and years. Use the dropdown to switch between metrics and the slider to move through years. Gray indicates that no data was available for that country in that year for that indicator. Note that there seem to be a lot of missing data. ::: {#fig-map}\n\nGlobal health indicators over time. :::"
+  },
+  {
+    "objectID": "index.html#models",
+    "href": "index.html#models",
+    "title": "On the Effects of Government Medical Spending and Health Personnel On HIV Spread",
+    "section": "Models",
+    "text": "Models\nThree model families were trained and evaluated across four feature variants:\n\n\n\n\n\n\n\nVariant\nFeatures\n\n\n\n\nall\nhealth_expense_percent, doctor_10k, nurse_10k, pharm_10k\n\n\nno_nurse\nhealth_expense_percent, doctor_10k, pharm_10k\n\n\nno_health_expense\ndoctor_10k, nurse_10k, pharm_10k\n\n\naggregate_only\npersonnel_10k\n\n\n\nA nested cross-validation design was used. The cross validation was done using RandomizedSearchCV with a 5-fold outer loop and a 3-fold inner loop across 30 iterations to tune the hyperparameters. An 80/20 train/test split was held out entirely from cross-validation and used for testing at the end.\n\nModel Performance\nThe plot below displays the root mean squared error (RMSE) and the Pearson R\\(^2\\) values for each of the three model types, for each of the four variants (by feature). The drop down menu can be use to toggle how the plots group the models (by features used vs by model type). We see that in general, using all features yields the best metric values, while using the aggregate gives the worst. Random forest also appears to slightly outperform XGB under these metrics. ::: {#fig-map}\n\nThe root mean squared error and Pearson R\\(^2\\) for each model and its variants. :::\n\n\nResiduals\nThe plot below shows the residuals of each of the models when using all features. It is clear that the errors do not appear to be normally distributed, instead possessing a systematic pattern of being cone shaped, fanning out towards the right. ::: {#fig-map}\n\nThe residuals of each model when using all features. :::\n\n\nActual vs Predicted\nThis plot shows the actual value in contrast to the predicted values. The red dashed line is where the points would be if the model performed perfectly. It can be seen that both the random forest and the XGB models overestimate the smaller points. ::: {#fig-map}\n\nThe actual versus predicted values of each model when using all features, when predicting the test values. :::"
+  }
+]
